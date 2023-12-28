@@ -2,9 +2,11 @@ import numpy as np
 import scipy.special as sc
 from numpy.linalg import inv, det
 
+log_2pi = np.log(2 * np.pi)
+
 class DpGaussian2D:
     """
-    2 Dimensional, Diagonal variance matrix, with equal variance in each dimension.
+    2 Dimensional, Diagonal variance matrix, with equal variance in each dimension (spherical).
     """
 
     def __init__(self, x, alpha, sigma: float, mu0, sigma0: float, K: int) -> None:
@@ -27,9 +29,9 @@ class DpGaussian2D:
         self.N = len(x)
         self.K = K
 
-        self.theta = np.random.random((self.N, self.K))
-        for theta_i in self.theta:
-            theta_i /= np.sum(theta_i)
+        self.phi = np.random.random((self.N, self.K))
+        for phi_i in self.phi:
+            phi_i /= np.sum(phi_i)
 
         self.gamma1 = np.random.random((self.K,))
         self.gamma2 = np.random.random((self.K,))
@@ -38,10 +40,10 @@ class DpGaussian2D:
 
     def update(self):
         for i in range(self.K):
-            self.gamma1[i] = 1 + np.sum(self.theta[:, i])
-            self.gamma2[i] = self.alpha + np.sum(self.theta[:, i+1: self.K])
-            self.tau1[i] = self.lmbda1 + np.dot(self.theta[:, i], self.x)
-            self.tau2[i] = self.lmbda2 + np.sum(self.theta[:, i])
+            self.gamma1[i] = 1 + np.sum(self.phi[:, i])
+            self.gamma2[i] = self.alpha + np.sum(self.phi[:, i+1: self.K])
+            self.tau1[i] = self.lmbda1 + np.dot(self.phi[:, i], self.x)
+            self.tau2[i] = self.lmbda2 + np.sum(self.phi[:, i])
 
         E_mu_T_mu = np.sum(self.tau1 * self.tau1, axis=1) / self.tau2 ** 2 + 2 * self.sigma ** 2 / self.tau2
 
@@ -52,7 +54,7 @@ class DpGaussian2D:
                      + np.dot(self.tau1[i], self.x[n]) / self.sigma ** 2 / self.tau2[i] \
                      - (E_mu_T_mu[i]) / 2 / self.sigma ** 2 \
                      + np.sum(sc.digamma(self.gamma2[0: i-1]) - sc.digamma(self.gamma1[0: i-1] + self.gamma2[0: i-1])))
-            self.theta[n] = E / np.sum(E)
+            self.phi[n] = E / np.sum(E)
     
     def elbo(self) -> float:
         E_log_v = sc.digamma(self.gamma1) - sc.digamma(self.gamma1 + self.gamma2)
@@ -71,9 +73,9 @@ class DpGaussian2D:
             E_log_p_eta += - (E_mu_T_mu[i] - 2 * np.dot(self.tau1[i], self.mu0) / self.tau2[i] + np.dot(self.mu0, self.mu0)) / 2 / self.sigma0 ** 2
             
             for n in range(self.N):
-                E_log_p_Z += np.sum(self.theta[n, i+1: self.K]) * E_log_neg_v[i] + self.theta[n, i] * E_log_v[i] # speed up?
-                E_log_p_x += - self.theta[n, i] * (np.dot(self.x[n], self.x[n]) - 2 * np.dot(self.tau1[i], self.x[n]) / self.tau2[i] + E_mu_T_mu[i]) / 2 / self.sigma ** 2
-                E_log_q_z += self.theta[n, i] * np.log(self.theta[n, i])
+                E_log_p_Z += np.sum(self.phi[n, i+1: self.K]) * E_log_neg_v[i] + self.phi[n, i] * E_log_v[i] # speed up?
+                E_log_p_x += - self.phi[n, i] * (np.dot(self.x[n], self.x[n]) - 2 * np.dot(self.tau1[i], self.x[n]) / self.tau2[i] + E_mu_T_mu[i]) / 2 / self.sigma ** 2
+                E_log_q_z += self.phi[n, i] * np.log(self.phi[n, i])
 
             if i < self.K - 1:
                 E_log_q_v += - sc.betaln(self.gamma1[i], self.gamma2[i]) + (self.gamma1[i] - 1) * E_log_v[i] + (self.gamma2[i] - 1) * E_log_neg_v[i]
@@ -81,128 +83,120 @@ class DpGaussian2D:
             E_log_q_eta += np.log(self.tau2[i]) - 1
         
         return E_log_p_V + E_log_p_eta + E_log_p_Z + E_log_p_x - E_log_q_v - E_log_q_eta - E_log_q_z
-    
-    def get_mean_and_cov(self):
-        mu_p = np.zeros((self.K, 2))
-        cov_p = np.zeros((self.K,))
-        
-        for i in range(self.K):
-            mu_p[i] = self.tau1[i] / self.tau2[i]
-            cov_p[i] = self.sigma / self.tau2[i]
-
-        return mu_p, cov_p
 
 class DpGaussian:
     """
     A general DP Gaussian-Gaussian model.
     """
 
-    def __init__(self, x, alpha: float, Lmbda, mu0, Lmbda0, K: int) -> None:
+    def __init__(self, x, alpha: float, Sigma, mu0, Sigma0, K: int) -> None:
         """
         x: array with size (N, D)
         alpha: parameter of DP
-        Lmbda: covariance matrix of gaussian
+        Sigma: covariance matrix of gaussian
         mu0: mean of the prior to mean of gaussian
-        Lmbda0: covariance matrix of the prior
+        Sigma0: covariance matrix of the prior
         K: truncation level
         """
         self.x = x
         self.alpha = alpha
-        self.Lmbda = Lmbda
-        self.Lmbda0 = Lmbda0
-        self.Lmbda_inv = inv(self.Lmbda)
-        self.Lmbda0_inv = inv(self.Lmbda0)
+        self.Sigma = Sigma
+        self.Sigma0 = Sigma0
+        self.Sigma_inv = inv(self.Sigma)
+        self.Sigma0_inv = inv(self.Sigma0)
         self.mu0 = mu0
-        self.lmbda1 = self.Lmbda @ self.Lmbda0_inv @ self.mu0
+        self.lmbda1 = self.Sigma @ self.Sigma0_inv @ self.mu0
         self.lmbda2 = 0
 
         self.N = np.size(x, 0)
         self.D = np.size(x, 1)
         self.K = K
 
-        self.theta = np.random.random((self.N, self.K))
-        for theta_i in self.theta:
-            theta_i /= np.sum(theta_i)
+        self.phi = np.random.random((self.N, self.K))
+        for phi_i in self.phi:
+            phi_i /= np.sum(phi_i)
 
         self.gamma1 = np.random.random((self.K,))
         self.gamma2 = np.random.random((self.K,))
         self.tau1 = np.random.random((self.K, self.D))
         self.tau2 = np.random.random((self.K,))
 
+        self.Sigma_p = np.zeros((self.K, self.D, self.D))
+        self.Sigma_p_inv = np.zeros((self.K, self.D, self.D))
+        self.mu_p = np.zeros((self.K, self.D))
+
     def update(self):
         for i in range(self.K):
-            self.gamma1[i] = 1 + np.sum(self.theta[:, i])
-            self.gamma2[i] = self.alpha + np.sum(self.theta[:, i+1: self.K])
-            self.tau1[i] = self.lmbda1 + np.dot(self.theta[:, i], self.x)
-            self.tau2[i] = self.lmbda2 + np.sum(self.theta[:, i])
+            self.gamma1[i] = 1 + np.sum(self.phi[:, i])
+            self.gamma2[i] = self.alpha + np.sum(self.phi[:, i+1: self.K])
+            self.tau1[i] = self.lmbda1 + np.dot(self.phi[:, i], self.x)
+            self.tau2[i] = self.lmbda2 + np.sum(self.phi[:, i])
             
         E_log_v = sc.digamma(self.gamma1) - sc.digamma(self.gamma1 + self.gamma2)
         E_log_neg_v = sc.digamma(self.gamma2) - sc.digamma(self.gamma1 + self.gamma2)
 
-        Lmbda_p_inv = np.zeros((self.K, self.D, self.D))
-        Lmbda_p = np.zeros((self.K, self.D, self.D))
+        Sigma_p_inv = np.zeros((self.K, self.D, self.D))
+        Sigma_p = np.zeros((self.K, self.D, self.D))
         mu_p = np.zeros((self.K, self.D))
         E_a_eta = np.zeros((self.K,))
 
         for i in range(self.K):
-            Lmbda_p_inv[i] = self.tau2[i] * self.Lmbda_inv + self.Lmbda0_inv
-            Lmbda_p[i] = inv(Lmbda_p_inv[i])
-            mu_p[i] = Lmbda_p[i] @ self.Lmbda_inv @ self.tau1[i]
-            E_a_eta[i] = 0.5 * (mu_p[i] @ self.Lmbda_inv @ mu_p[i] + np.sum(self.Lmbda_inv * Lmbda_p[i]))
+            Sigma_p_inv[i] = self.tau2[i] * self.Sigma_inv + self.Sigma0_inv
+            Sigma_p[i] = inv(Sigma_p_inv[i])
+            mu_p[i] = Sigma_p[i] @ self.Sigma_inv @ self.tau1[i]
+            E_a_eta[i] = 0.5 * (mu_p[i] @ self.Sigma_inv @ mu_p[i] + np.sum(self.Sigma_inv * Sigma_p[i]))
 
         for n in range(self.N):
             E = np.zeros(self.K)
             for i in range(self.K):
-                E[i] = np.exp(E_log_v[i] + mu_p[i] @ self.Lmbda_inv @ self.x[n] - E_a_eta[i] + np.sum(E_log_neg_v[0: i - 1]))
-            self.theta[n] = E / np.sum(E)
+                E[i] = np.exp(E_log_v[i] + mu_p[i] @ self.Sigma_inv @ self.x[n] - E_a_eta[i] + np.sum(E_log_neg_v[0: i - 1]))
+            self.phi[n] = E / np.sum(E)
+
+        for i in range(self.K):
+            self.Sigma_p_inv[i] = self.tau2[i] * self.Sigma_inv + self.Sigma0_inv
+            self.Sigma_p[i] = inv(Sigma_p_inv[i])
+            self.mu_p[i] = Sigma_p[i] @ self.Sigma_inv @ self.tau1[i]
 
     def elbo(self) -> float:
         E_log_v = sc.digamma(self.gamma1) - sc.digamma(self.gamma1 + self.gamma2)
         E_log_neg_v = sc.digamma(self.gamma2) - sc.digamma(self.gamma1 + self.gamma2)
 
         E_log_p_V = - self.K * sc.beta(1, self.alpha) + (self.alpha - 1) * np.sum(E_log_neg_v)
-        E_log_p_eta = - self.K * (self.D / 2 * np.log(2 * np.pi) + 0.5 * np.log(det(self.Lmbda0)))
+        E_log_p_eta = - self.K * (self.D / 2 * log_2pi + 0.5 * np.log(det(self.Sigma0)))
         E_log_p_Z = 0
-        E_log_p_x = - self.N * (self.D / 2 * np.log(2 * np.pi) + 0.5 * np.log(det(self.Lmbda0)))
+        E_log_p_x = - self.N * (self.D / 2 * log_2pi + 0.5 * np.log(det(self.Sigma0)))
         E_log_q_v = 0
-        E_log_q_eta = - self.K * (self.D / 2 * np.log(2 * np.pi) - 0.5 * self.D ** 2)
+        E_log_q_eta = - self.K * (self.D / 2 * log_2pi - 0.5 * self.D ** 2)
         E_log_q_z = 0
 
-        Lmbda_p_inv = np.zeros((self.K, self.D, self.D))
-        Lmbda_p = np.zeros((self.K, self.D, self.D))
-        mu_p = np.zeros((self.K, self.D))
-
         for i in range(self.K):
-            Lmbda_p_inv[i] = self.tau2[i] * self.Lmbda_inv + self.Lmbda0_inv
-            Lmbda_p[i] = inv(Lmbda_p_inv[i])
-            mu_p[i] = Lmbda_p[i] @ self.Lmbda_inv @ self.tau1[i]
-
-        for i in range(self.K):
-            E_log_p_eta += - 0.5 * (mu_p[i] @ self.Lmbda0_inv @ mu_p[i] + np.sum(self.Lmbda0_inv * Lmbda_p[i]) - 2 * self.mu0 @ self.Lmbda0_inv @ mu_p[i] + self.mu0 @ self.Lmbda0_inv @ self.mu0)
+            E_log_p_eta += - 0.5 * (self.mu_p[i] @ self.Sigma0_inv @ self.mu_p[i] + np.sum(self.Sigma0_inv * self.Sigma_p[i]) - 2 * self.mu0 @ self.Sigma0_inv @ self.mu_p[i] + self.mu0 @ self.Sigma0_inv @ self.mu0)
             
             for n in range(self.N):
-                E_log_p_Z += np.sum(self.theta[n, i+1: self.K]) * E_log_neg_v[i] + self.theta[n, i] * E_log_v[i] # speed up?
-                E_log_p_x += - self.theta[n, i] * 0.5 * (self.x[n] @ self.Lmbda_inv @ self.x[n] - 2 * self.x[n] @ self.Lmbda_inv @ mu_p[i] + mu_p[i] @ self.Lmbda_inv @ mu_p[i] + np.sum(self.Lmbda_inv * Lmbda_p[i]))
-                E_log_q_z += self.theta[n, i] * np.log(self.theta[n, i])
+                E_log_p_Z += np.sum(self.phi[n, i+1: self.K]) * E_log_neg_v[i] + self.phi[n, i] * E_log_v[i] # speed up?
+                E_log_p_x += - self.phi[n, i] * 0.5 * (self.x[n] @ self.Sigma_inv @ self.x[n] - 2 * self.x[n] @ self.Sigma_inv @ self.mu_p[i] + self.mu_p[i] @ self.Sigma_inv @ self.mu_p[i] + np.sum(self.Sigma_inv * self.Sigma_p[i]))
+                E_log_q_z += self.phi[n, i] * np.log(self.phi[n, i])
 
             if i < self.K - 1:
                 E_log_q_v += - sc.betaln(self.gamma1[i], self.gamma2[i]) + (self.gamma1[i] - 1) * E_log_v[i] + (self.gamma2[i] - 1) * E_log_neg_v[i]
 
-            E_log_q_eta += - 0.5 * np.log(det(Lmbda_p[i]))
+            E_log_q_eta += - 0.5 * np.log(det(self.Sigma_p[i]))
         
         return E_log_p_V + E_log_p_eta + E_log_p_Z + E_log_p_x - E_log_q_v - E_log_q_eta - E_log_q_z
-
-    def get_mean_and_cov(self):
-        Lmbda_p_inv = np.zeros((self.K, self.D, self.D))
-        Lmbda_p = np.zeros((self.K, self.D, self.D))
-        mu_p = np.zeros((self.K, self.D))
-        
-        for i in range(self.K):            
-            Lmbda_p_inv[i] = self.tau2[i] * self.Lmbda_inv + self.Lmbda0_inv
-            Lmbda_p[i] = inv(Lmbda_p_inv[i])
-            mu_p[i] = Lmbda_p[i] @ self.Lmbda_inv @ self.tau1[i]
-        
-        return mu_p, Lmbda_p
     
     def predict(self, x):
-        pass
+        # posterior covariance
+        cov_x = self.Sigma + self.Sigma_p
+        cov_x_inv = inv(cov_x)
+        log_det_cov_x = np.log(det(cov_x))
+        # prior probability of component i
+        log_p_k = np.log(np.sum(self.phi, axis=0) / self.N)
+
+        M = np.size(x, 0)
+        log_p_x_k = np.ones((M, self.K)) * (- self.D / 2 * log_2pi)
+        for n in range(M):
+            for i in range(self.K):
+                # probability of x_n, if in component i
+                log_p_x_k[n, i] += - 0.5 * log_det_cov_x[i] - 0.5 * (x[n] - self.mu_p[i]) @ cov_x_inv[i] @ (x[n] - self.mu_p[i]) 
+
+        return log_p_k + log_p_x_k
