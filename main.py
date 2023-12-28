@@ -1,56 +1,39 @@
 import numpy as np
 import scipy.special as sc
 import matplotlib.pyplot as plt
+from sklearn.mixture import BayesianGaussianMixture
+from scipy.io import arff
+from numpy.lib.recfunctions import structured_to_unstructured
+from timeit import default_timer
 
 from dp import *
 
-# np.random.seed(0)
-N = 100
+data, meta = arff.loadarff('dataset/dataset_2175_kin8nm.arff')
+data = structured_to_unstructured(data)
+N = 7000
 K = 20
-x1 = np.random.normal(loc=-10, scale=1, size=(50, 2))
-x2 = np.random.normal(loc=10, scale=1, size=(50, 2))
-x = np.concatenate((x1, x2), axis=0)
+train_data = data[:N, :-1]
 
-plt.figure()
-plt.scatter(x[:, 0], x[:, 1])
-plt.show()
+bgm = BayesianGaussianMixture(n_components=K, weight_concentration_prior=1e-5, n_init=1, covariance_type="diag", max_iter=1000, verbose=2)
+bgm.fit(train_data)
+print(bgm.n_features_in_)
+print(bgm.weights_)
+print(bgm.means_)
 
-alpha = 1
-sigma = 1
-mu0 = np.zeros((2,))
-sigma0 = 1
-dp = DpGaussian2D(x, alpha, sigma, mu0, sigma0, K)
-for i in range(20):
-    dp.update()
-    print(dp.elbo())
+print()
 
-# for n in range(N):
-    # print(dp.theta[n])
+print(bgm.covariances_)
 
-print(np.sum(dp.theta, axis=0))
+print()
 
-# for i in range(dp.K):
-#     print(dp.sigma ** 2 / dp.tau2[i])
-#     print(dp.tau1[i] / dp.tau2[i])
-#     print()
+# cov_X = np.cov(train_data.T)
+# mu_X = np.mean(train_data, axis=0)
 
-# for i in range(K):
-#     print(dp.gamma1[i], dp.gamma2[i])
+# dp = DpGaussian(x=train_data, alpha=1/K, Lmbda=cov_X, mu0=mu_X, Lmbda0=cov_X, K=20)
+# for i in range(50):
+#     start = default_timer()
+#     dp.update()
+#     time1 = default_timer() - start
 
-# Lmbda = np.diag(np.ones((2,)))
-# Lmbda0 = np.diag(np.ones((2,)))
-# dp2 = DpGaussian(x, alpha, Lmbda, mu0, Lmbda0, K)
-# for i in range(20):
-#     dp2.update()
-    # print(dp2.elbo())
-
-# Lmbda_p_inv = np.zeros((dp2.K, dp2.D, dp2.D))
-# Lmbda_p = np.zeros((dp2.K, dp2.D, dp2.D))
-# mu_p = np.zeros((dp2.K, dp2.D))
-# for i in range(dp2.K):            
-#     Lmbda_p_inv[i] = dp2.tau2[i] * dp2.Lmbda_inv + dp2.Lmbda0_inv
-#     Lmbda_p[i] = inv(Lmbda_p_inv[i])
-#     mu_p[i] = Lmbda_p[i] @ dp2.Lmbda_inv @ dp2.tau1[i]
-#     print(Lmbda_p[i])
-#     print(mu_p[i])
-#     print()
+#     start = default_timer()
+#     print(dp.elbo(), "time =", time1, default_timer() - start)

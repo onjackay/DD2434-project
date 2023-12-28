@@ -7,12 +7,14 @@ class DpGaussian2D:
     2 Dimensional, Diagonal variance matrix, with equal variance in each dimension.
     """
 
-    def __init__(self, x, alpha, sigma: float, mu0, sigma0: float, K) -> None:
+    def __init__(self, x, alpha, sigma: float, mu0, sigma0: float, K: int) -> None:
         """
+        x: array with size (N, 2)
         alpha: parameter of DP
         sigma: variance of gaussian
         mu0: mean of the prior to mean of gaussian
         sigma0: variance of the prior to mean of gaussian
+        K: truncation level
         """
         self.x = x
         self.alpha = alpha
@@ -74,23 +76,35 @@ class DpGaussian2D:
                 E_log_q_z += self.theta[n, i] * np.log(self.theta[n, i])
 
             if i < self.K - 1:
-                E_log_q_v += - np.log(sc.beta(self.gamma1[i], self.gamma2[i])) + (self.gamma1[i] - 1) * E_log_v[i] + (self.gamma2[i] - 1) * E_log_neg_v[i]
+                E_log_q_v += - sc.betaln(self.gamma1[i], self.gamma2[i]) + (self.gamma1[i] - 1) * E_log_v[i] + (self.gamma2[i] - 1) * E_log_neg_v[i]
 
             E_log_q_eta += np.log(self.tau2[i]) - 1
         
         return E_log_p_V + E_log_p_eta + E_log_p_Z + E_log_p_x - E_log_q_v - E_log_q_eta - E_log_q_z
+    
+    def get_mean_and_cov(self):
+        mu_p = np.zeros((self.K, 2))
+        cov_p = np.zeros((self.K,))
+        
+        for i in range(self.K):
+            mu_p[i] = self.tau1[i] / self.tau2[i]
+            cov_p[i] = self.sigma / self.tau2[i]
+
+        return mu_p, cov_p
 
 class DpGaussian:
     """
     A general DP Gaussian-Gaussian model.
     """
 
-    def __init__(self, x, alpha, Lmbda, mu0, Lmbda0, K) -> None:
+    def __init__(self, x, alpha: float, Lmbda, mu0, Lmbda0, K: int) -> None:
         """
+        x: array with size (N, D)
         alpha: parameter of DP
         Lmbda: covariance matrix of gaussian
         mu0: mean of the prior to mean of gaussian
         Lmbda0: covariance matrix of the prior
+        K: truncation level
         """
         self.x = x
         self.alpha = alpha
@@ -112,7 +126,7 @@ class DpGaussian:
 
         self.gamma1 = np.random.random((self.K,))
         self.gamma2 = np.random.random((self.K,))
-        self.tau1 = np.random.random((self.K, 2))
+        self.tau1 = np.random.random((self.K, self.D))
         self.tau2 = np.random.random((self.K,))
 
     def update(self):
@@ -129,6 +143,7 @@ class DpGaussian:
         Lmbda_p = np.zeros((self.K, self.D, self.D))
         mu_p = np.zeros((self.K, self.D))
         E_a_eta = np.zeros((self.K,))
+
         for i in range(self.K):
             Lmbda_p_inv[i] = self.tau2[i] * self.Lmbda_inv + self.Lmbda0_inv
             Lmbda_p[i] = inv(Lmbda_p_inv[i])
@@ -156,6 +171,7 @@ class DpGaussian:
         Lmbda_p_inv = np.zeros((self.K, self.D, self.D))
         Lmbda_p = np.zeros((self.K, self.D, self.D))
         mu_p = np.zeros((self.K, self.D))
+
         for i in range(self.K):
             Lmbda_p_inv[i] = self.tau2[i] * self.Lmbda_inv + self.Lmbda0_inv
             Lmbda_p[i] = inv(Lmbda_p_inv[i])
@@ -170,9 +186,23 @@ class DpGaussian:
                 E_log_q_z += self.theta[n, i] * np.log(self.theta[n, i])
 
             if i < self.K - 1:
-                E_log_q_v += - np.log(sc.beta(self.gamma1[i], self.gamma2[i])) + (self.gamma1[i] - 1) * E_log_v[i] + (self.gamma2[i] - 1) * E_log_neg_v[i]
+                E_log_q_v += - sc.betaln(self.gamma1[i], self.gamma2[i]) + (self.gamma1[i] - 1) * E_log_v[i] + (self.gamma2[i] - 1) * E_log_neg_v[i]
 
             E_log_q_eta += - 0.5 * np.log(det(Lmbda_p[i]))
         
         return E_log_p_V + E_log_p_eta + E_log_p_Z + E_log_p_x - E_log_q_v - E_log_q_eta - E_log_q_z
 
+    def get_mean_and_cov(self):
+        Lmbda_p_inv = np.zeros((self.K, self.D, self.D))
+        Lmbda_p = np.zeros((self.K, self.D, self.D))
+        mu_p = np.zeros((self.K, self.D))
+        
+        for i in range(self.K):            
+            Lmbda_p_inv[i] = self.tau2[i] * self.Lmbda_inv + self.Lmbda0_inv
+            Lmbda_p[i] = inv(Lmbda_p_inv[i])
+            mu_p[i] = Lmbda_p[i] @ self.Lmbda_inv @ self.tau1[i]
+        
+        return mu_p, Lmbda_p
+    
+    def predict(self, x):
+        pass
