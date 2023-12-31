@@ -114,7 +114,7 @@ class DpGaussianSpherical2D:
                 np.argmax(out, axis=1) gives the label of x_n
         """
         # posterior variance
-        var_x = self.sigma + self.sigma_p
+        var_x = self.sigma ** 2 + self.sigma_p ** 2
         # prior probability of component i
         log_p_k = np.log(np.sum(self.phi, axis=0) / self.N)
 
@@ -237,7 +237,7 @@ class DpGaussianSpherical:
                 np.argmax(out, axis=1) gives the label of x_n
         """
         # posterior variance
-        var_x = self.sigma + self.sigma_p
+        var_x = self.sigma ** 2 + self.sigma_p ** 2
         # prior probability of component i
         log_p_k = np.log(np.sum(self.phi, axis=0) / self.N)
 
