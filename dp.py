@@ -3,6 +3,7 @@ import scipy.special as sc
 from numpy.linalg import inv, det
 
 log_2pi = np.log(2 * np.pi)
+eps = 1e-9
 
 class DpGaussianSpherical2D:
     """
@@ -56,14 +57,17 @@ class DpGaussianSpherical2D:
             self.tau2[i] = self.lmbda2 + np.sum(self.phi[:, i])
 
         E_mu_T_mu = np.sum(self.tau1 * self.tau1, axis=1) / self.tau2 ** 2 + 2 * self.sigma ** 2 / self.tau2
+        E_log_v = sc.digamma(self.gamma1) - sc.digamma(self.gamma1 + self.gamma2)
+        E_log_v[-1] = 0
+        E_log_neg_v = sc.digamma(self.gamma2) - sc.digamma(self.gamma1 + self.gamma2)
 
         for n in range(self.N):
             E = np.zeros(self.K)
             for i in range(self.K):
-                E[i] = np.exp(sc.digamma(self.gamma1[i]) - sc.digamma(self.gamma1[i] + self.gamma2[i]) \
+                E[i] = np.exp(E_log_v[i] \
                      + np.dot(self.tau1[i], self.x[n]) / self.sigma ** 2 / self.tau2[i] \
                      - (E_mu_T_mu[i]) / 2 / self.sigma ** 2 \
-                     + np.sum(sc.digamma(self.gamma2[0: i-1]) - sc.digamma(self.gamma1[0: i-1] + self.gamma2[0: i-1])))
+                     + np.sum(E_log_neg_v[0: i]))
             self.phi[n] = E / np.sum(E)
 
         for i in range(self.K):
@@ -116,7 +120,14 @@ class DpGaussianSpherical2D:
         # posterior variance
         var_x = self.sigma ** 2 + self.sigma_p ** 2
         # prior probability of component i
-        log_p_k = np.log(np.sum(self.phi, axis=0) / self.N)
+        log_p_k = np.zeros((self.K,))
+        temp_sum = 0
+        for i in range(self.K):
+            if i < self.K - 1:
+                log_p_k[i] = temp_sum + np.log(self.gamma1[i]) - np.log(self.gamma1[i] + self.gamma2[i])
+            else:
+                log_p_k[i] = temp_sum 
+            temp_sum += np.log(self.gamma2[i]) - np.log(self.gamma1[i] + self.gamma2[i])
 
         M = np.size(x, 0)
         log_p_x_k = np.ones((M, self.K)) * (- log_2pi)
@@ -179,14 +190,17 @@ class DpGaussianSpherical:
             self.tau2[i] = self.lmbda2 + np.sum(self.phi[:, i])
 
         E_mu_T_mu = np.sum(self.tau1 * self.tau1, axis=1) / self.tau2 ** 2 + self.D * self.sigma ** 2 / self.tau2
+        E_log_v = sc.digamma(self.gamma1) - sc.digamma(self.gamma1 + self.gamma2)
+        E_log_v[-1] = 0
+        E_log_neg_v = sc.digamma(self.gamma2) - sc.digamma(self.gamma1 + self.gamma2)
 
         for n in range(self.N):
             E = np.zeros(self.K)
             for i in range(self.K):
-                E[i] = np.exp(sc.digamma(self.gamma1[i]) - sc.digamma(self.gamma1[i] + self.gamma2[i]) \
+                E[i] = np.exp(E_log_v[i] \
                      + np.dot(self.tau1[i], self.x[n]) / self.sigma ** 2 / self.tau2[i] \
                      - (E_mu_T_mu[i]) / 2 / self.sigma ** 2 \
-                     + np.sum(sc.digamma(self.gamma2[0: i-1]) - sc.digamma(self.gamma1[0: i-1] + self.gamma2[0: i-1])))
+                     + np.sum(E_log_neg_v[0: i]))
             self.phi[n] = E / np.sum(E)
 
         for i in range(self.K):
@@ -230,16 +244,23 @@ class DpGaussianSpherical:
             x: an array of dataset, with size (M, D)
         Output: 
             An array of size (M, K):
-                out[n, i] is the likelihood of "the model generates x_n, and it is in i-th component." 
+                out[n, i] is the log likelihood of "the model generates x_n, and it is in i-th component." 
 
-                np.sum(out, axis=1) gives the likelihood of x_n
+                logsumexp(out, axis=1) gives the log likelihood of x_n
                 
                 np.argmax(out, axis=1) gives the label of x_n
         """
         # posterior variance
         var_x = self.sigma ** 2 + self.sigma_p ** 2
         # prior probability of component i
-        log_p_k = np.log(np.sum(self.phi, axis=0) / self.N)
+        log_p_k = np.zeros((self.K,))
+        temp_sum = 0
+        for i in range(self.K):
+            if i < self.K - 1:
+                log_p_k[i] = temp_sum + np.log(self.gamma1[i]) - np.log(self.gamma1[i] + self.gamma2[i])
+            else:
+                log_p_k[i] = temp_sum 
+            temp_sum += np.log(self.gamma2[i]) - np.log(self.gamma1[i] + self.gamma2[i])
 
         M = np.size(x, 0)
         log_p_x_k = np.ones((M, self.K)) * (- 0.5 * self.D * log_2pi)
@@ -299,6 +320,7 @@ class DpGaussianFull:
             self.tau2[i] = self.lmbda2 + np.sum(self.phi[:, i])
             
         E_log_v = sc.digamma(self.gamma1) - sc.digamma(self.gamma1 + self.gamma2)
+        E_log_v[-1] = 0
         E_log_neg_v = sc.digamma(self.gamma2) - sc.digamma(self.gamma1 + self.gamma2)
 
         Sigma_p_inv = np.zeros((self.K, self.D, self.D))
@@ -315,7 +337,7 @@ class DpGaussianFull:
         for n in range(self.N):
             E = np.zeros(self.K)
             for i in range(self.K):
-                E[i] = np.exp(E_log_v[i] + mu_p[i] @ self.Sigma_inv @ self.x[n] - E_a_eta[i] + np.sum(E_log_neg_v[0: i - 1]))
+                E[i] = np.exp(E_log_v[i] + mu_p[i] @ self.Sigma_inv @ self.x[n] - E_a_eta[i] + np.sum(E_log_neg_v[0: i]))
             self.phi[n] = E / np.sum(E)
 
         for i in range(self.K):
@@ -341,7 +363,7 @@ class DpGaussianFull:
             for n in range(self.N):
                 E_log_p_Z += np.sum(self.phi[n, i+1: self.K]) * E_log_neg_v[i] + self.phi[n, i] * E_log_v[i] # speed up?
                 E_log_p_x += - self.phi[n, i] * 0.5 * (self.x[n] @ self.Sigma_inv @ self.x[n] - 2 * self.x[n] @ self.Sigma_inv @ self.mu_p[i] + self.mu_p[i] @ self.Sigma_inv @ self.mu_p[i] + np.sum(self.Sigma_inv * self.Sigma_p[i]))
-                E_log_q_z += self.phi[n, i] * np.log(self.phi[n, i])
+                E_log_q_z += self.phi[n, i] * np.log(self.phi[n, i] + eps)
 
             if i < self.K - 1:
                 E_log_q_v += - sc.betaln(self.gamma1[i], self.gamma2[i]) + (self.gamma1[i] - 1) * E_log_v[i] + (self.gamma2[i] - 1) * E_log_neg_v[i]
@@ -367,7 +389,14 @@ class DpGaussianFull:
         cov_x_inv = inv(cov_x)
         log_det_cov_x = np.log(det(cov_x))
         # prior probability of component i
-        log_p_k = np.log(np.sum(self.phi, axis=0) / self.N)
+        log_p_k = np.zeros((self.K,))
+        temp_sum = 0
+        for i in range(self.K):
+            if i < self.K - 1:
+                log_p_k[i] = temp_sum + np.log(self.gamma1[i]) - np.log(self.gamma1[i] + self.gamma2[i])
+            else:
+                log_p_k[i] = temp_sum 
+            temp_sum += np.log(self.gamma2[i]) - np.log(self.gamma1[i] + self.gamma2[i])
 
         M = np.size(x, 0)
         log_p_x_k = np.ones((M, self.K)) * (- self.D / 2 * log_2pi)
