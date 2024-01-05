@@ -334,10 +334,15 @@ class DpGaussianFull:
             mu_p[i] = Sigma_p[i] @ self.Sigma_inv @ self.tau1[i]
             E_a_eta[i] = 0.5 * (mu_p[i] @ self.Sigma_inv @ mu_p[i] + np.sum(self.Sigma_inv * Sigma_p[i]))
 
+
         for n in range(self.N):
+            pre_sum_E_log_neg_v = 0
+            E_n = self.Sigma_inv @ self.x[n]
             E = np.zeros(self.K)
+
             for i in range(self.K):
-                E[i] = np.exp(E_log_v[i] + mu_p[i] @ self.Sigma_inv @ self.x[n] - E_a_eta[i] + np.sum(E_log_neg_v[0: i]))
+                E[i] = np.exp(E_log_v[i] + mu_p[i] @ E_n - E_a_eta[i] + pre_sum_E_log_neg_v)
+                pre_sum_E_log_neg_v += E_log_neg_v[i]
             self.phi[n] = E / np.sum(E)
 
         for i in range(self.K):
@@ -357,12 +362,22 @@ class DpGaussianFull:
         E_log_q_eta = - self.K * (self.D / 2 * log_2pi - 0.5 * self.D ** 2)
         E_log_q_z = 0
 
+        post_sum_phi = np.sum(self.phi, axis=1)
+
+        E_log_p_x_n = np.zeros((self.N,))
+        for n in range(self.N):
+            E_log_p_x_n[n] = self.x[n] @ self.Sigma_inv @ self.x[n]
+
         for i in range(self.K):
             E_log_p_eta += - 0.5 * (self.mu_p[i] @ self.Sigma0_inv @ self.mu_p[i] + np.sum(self.Sigma0_inv * self.Sigma_p[i]) - 2 * self.mu0 @ self.Sigma0_inv @ self.mu_p[i] + self.mu0 @ self.Sigma0_inv @ self.mu0)
-            
+
+            E_log_p_x_i = self.mu_p[i] @ self.Sigma_inv @ self.mu_p[i] + np.sum(self.Sigma_inv * self.Sigma_p[i])
+            temp_i = self.Sigma_inv @ self.mu_p[i]
+
             for n in range(self.N):
-                E_log_p_Z += np.sum(self.phi[n, i+1: self.K]) * E_log_neg_v[i] + self.phi[n, i] * E_log_v[i] # speed up?
-                E_log_p_x += - self.phi[n, i] * 0.5 * (self.x[n] @ self.Sigma_inv @ self.x[n] - 2 * self.x[n] @ self.Sigma_inv @ self.mu_p[i] + self.mu_p[i] @ self.Sigma_inv @ self.mu_p[i] + np.sum(self.Sigma_inv * self.Sigma_p[i]))
+                post_sum_phi[n] -= self.phi[n, i]
+                E_log_p_Z += post_sum_phi[n] * E_log_neg_v[i] + self.phi[n, i] * E_log_v[i]
+                E_log_p_x += - self.phi[n, i] * 0.5 * (E_log_p_x_n[n] - 2 * self.x[n] @ temp_i + E_log_p_x_i)
                 E_log_q_z += self.phi[n, i] * np.log(self.phi[n, i] + eps)
 
             if i < self.K - 1:
